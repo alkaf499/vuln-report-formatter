@@ -1,0 +1,21 @@
+# Generated BU lookup database — contains real hostnames and business-unit names
+bu_database.json
+
+# Downloaded Qualys reports and formatted output
+*_formatted.xlsx
+*_by_bu.xlsx
+*_comparison.xlsx
+*_cve_findings.csv
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vuln Report Formatter</title>
+<meta name="description" content="A desktop tool that turns raw vulnerability-scanner exports into readable Excel workbooks without deleting a single cell.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F6F7F9;
+  --panel:#FFFFFF;
+  --ink:#141D26;
+  --ink-soft:#5A6775;
+  --rule:#DDE2E8;
+  --keep:#136F57;
+  --keep-bg:#E4F0EC;
+  --hide:#AEB8C2;
+  --measure:64ch;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#0F151B;
+    --panel:#161F27;
+    --ink:#E8EDF2;
+    --ink-soft:#97A3AF;
+    --rule:#2A353F;
+    --keep:#4FBF9B;
+    --keep-bg:#152C27;
+    --hide:#55636F;
+  }
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:17px;
+  line-height:1.6;
+  font-feature-settings:"ss01";
+}
+.wrap{max-width:1040px;margin:0 auto;padding-left:24px;padding-right:24px}
+p{max-width:var(--measure)}
+a{color:var(--ink);text-decoration-thickness:1px;text-underline-offset:3px}
+a:hover{color:var(--keep)}
+:focus-visible{outline:2px solid var(--keep);outline-offset:3px}
+
+/* ---------- masthead ---------- */
+.masthead{padding:72px 0 34px}
+.wordmark{
+  font-size:clamp(2.6rem,7vw,4.6rem);
+  font-weight:700;
+  letter-spacing:-.035em;
+  line-height:.98;
+  margin:0 0 20px;
+  max-width:none;
+}
+.standfirst{
+  font-size:clamp(1.05rem,2.2vw,1.3rem);
+  color:var(--ink-soft);
+  margin:0;
+  max-width:54ch;
+  line-height:1.5;
+}
+
+/* ---------- the collapse demo ---------- */
+.demo{padding:0 0 10px}
+.scroller{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.grid{
+  min-width:660px;
+  display:flex;
+  background:var(--panel);
+  border:1px solid var(--rule);
+  border-radius:3px;
+  overflow:hidden;
+  font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:12.5px;
+}
+.col{
+  flex:1 1 0;
+  min-width:0;
+  border-right:1px solid var(--rule);
+  transition:flex-grow .85s cubic-bezier(.4,.1,.2,1),
+             flex-basis .85s cubic-bezier(.4,.1,.2,1);
+}
+.col:last-child{border-right:0}
+.col .cell{
+  padding:9px 10px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  border-bottom:1px solid var(--rule);
+  transition:opacity .45s ease;
+}
+.col .cell:last-child{border-bottom:0}
+.col .cell.head{
+  font-weight:500;
+  color:var(--ink-soft);
+  background:var(--paper);
+}
+.col.keep .cell.head{color:var(--keep);background:var(--keep-bg)}
+.col.collapsed{flex:0 0 9px;background:repeating-linear-gradient(
+  135deg,transparent 0 3px,var(--rule) 3px 4px)}
+.col.collapsed .cell{opacity:0}
+
+.readout{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px 18px;
+  align-items:baseline;
+  margin:14px 0 0;
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:13px;
+  color:var(--ink-soft);
+}
+#count{color:var(--keep)}
+.caption{
+  margin:10px 0 0;
+  max-width:58ch;
+  font-size:.95rem;
+  color:var(--ink-soft);
+}
+.caption strong{color:var(--ink);font-weight:600}
+.replay{
+  font:inherit;
+  color:var(--ink-soft);
+  background:none;
+  border:0;
+  border-bottom:1px solid var(--rule);
+  padding:0 0 1px;
+  cursor:pointer;
+}
+.replay:hover{color:var(--keep);border-color:var(--keep)}
+
+/* ---------- generic sections ---------- */
+section{padding:62px 0}
+section + section{border-top:1px solid var(--rule)}
+h2{
+  font-size:1.5rem;
+  font-weight:600;
+  letter-spacing:-.02em;
+  margin:0 0 10px;
+}
+.lede{color:var(--ink-soft);margin:0 0 30px}
+
+/* ---------- capability rows ---------- */
+.rows{border-top:1px solid var(--rule)}
+.row{
+  display:grid;
+  grid-template-columns:200px 1fr;
+  gap:4px 32px;
+  padding:20px 0;
+  border-bottom:1px solid var(--rule);
+}
+.row h3{
+  margin:0;
+  font-size:1rem;
+  font-weight:600;
+  letter-spacing:-.01em;
+}
+.row p{margin:0;color:var(--ink-soft);font-size:.95rem}
+@media (max-width:640px){
+  .row{grid-template-columns:1fr;gap:6px}
+}
+
+/* ---------- sheets ---------- */
+.sheets{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  border:1px solid var(--rule);
+  border-radius:3px;
+  overflow:hidden;
+  background:var(--panel);
+}
+.sheet{padding:18px 18px 20px;border-right:1px solid var(--rule)}
+.sheet:last-child{border-right:0}
+.sheet .tab{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:12.5px;
+  color:var(--keep);
+  margin:0 0 7px;
+}
+.sheet p{margin:0;font-size:.9rem;color:var(--ink-soft)}
+@media (max-width:640px){
+  .sheet{border-right:0;border-bottom:1px solid var(--rule)}
+  .sheet:last-child{border-bottom:0}
+}
+
+/* ---------- code ---------- */
+pre{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:13px;
+  line-height:1.75;
+  background:var(--panel);
+  border:1px solid var(--rule);
+  border-radius:3px;
+  padding:16px 18px;
+  overflow-x:auto;
+  margin:0 0 14px;
+  max-width:none;
+}
+pre .c{color:var(--ink-soft)}
+code{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.88em}
+p code{background:var(--panel);border:1px solid var(--rule);border-radius:2px;padding:1px 5px}
+
+.note{
+  border-left:2px solid var(--keep);
+  padding:2px 0 2px 16px;
+  margin:26px 0 0;
+  color:var(--ink-soft);
+  font-size:.95rem;
+}
+.note strong{color:var(--ink);font-weight:600}
+
+footer{
+  padding:40px 0 70px;
+  border-top:1px solid var(--rule);
+  color:var(--ink-soft);
+  font-size:.9rem;
+}
+footer p{margin:0}
+
+@media (prefers-reduced-motion:reduce){
+  .col,.col .cell{transition:none}
+}
+</style>
+</head>
+<body>
+
+<header class="masthead wrap">
+  <h1 class="wordmark">Vuln Report Formatter</h1>
+  <p class="standfirst">Scanner exports arrive forty columns wide, with the header row buried on line nine. This makes them readable — without deleting a single cell.</p>
+</header>
+
+<div class="wrap demo">
+  <div class="scroller">
+  <div class="grid" id="grid" aria-hidden="true">
+    <div class="col" data-keep="0">
+      <div class="cell head">QID</div><div class="cell">38170</div><div class="cell">91412</div><div class="cell">11827</div>
+    </div>
+    <div class="col" data-keep="1">
+      <div class="cell head">Title</div><div class="cell">SSL cert expired</div><div class="cell">SMB signing off</div><div class="cell">OpenSSH outdated</div>
+    </div>
+    <div class="col" data-keep="1">
+      <div class="cell head">Asset Name</div><div class="cell">host01.example.com</div><div class="cell">host04.example.com</div><div class="cell">host09.example.com</div>
+    </div>
+    <div class="col" data-keep="0">
+      <div class="cell head">Severity</div><div class="cell">4</div><div class="cell">3</div><div class="cell">3</div>
+    </div>
+    <div class="col" data-keep="1">
+      <div class="cell head">Asset IPV4</div><div class="cell">10.4.0.11</div><div class="cell">10.4.0.14</div><div class="cell">10.4.0.19</div>
+    </div>
+    <div class="col" data-keep="0">
+      <div class="cell head">Port</div><div class="cell">443</div><div class="cell">445</div><div class="cell">22</div>
+    </div>
+    <div class="col" data-keep="1">
+      <div class="cell head">Results</div><div class="cell">notAfter 2026-02-11</div><div class="cell">signing not required</div><div class="cell">version 8.2p1</div>
+    </div>
+    <div class="col" data-keep="0">
+      <div class="cell head">Tracking</div><div class="cell">IP</div><div class="cell">IP</div><div class="cell">DNS</div>
+    </div>
+    <div class="col" data-keep="1">
+      <div class="cell head">Solution</div><div class="cell">Reissue certificate</div><div class="cell">Enforce via GPO</div><div class="cell">Upgrade to 9.6</div>
+    </div>
+  </div>
+  </div>
+  <p class="readout">
+    <span id="count">9 columns in the export</span>
+    <button class="replay" id="replay" type="button">Run it again</button>
+  </p>
+  <p class="caption"><strong>Nothing is deleted.</strong> The rest are hidden in the sheet, one click from coming back.</p>
+</div>
+
+<main>
+<section class="wrap">
+  <h2>What it handles</h2>
+  <p class="lede">Five jobs that otherwise eat a morning each month, in one window.</p>
+  <div class="rows">
+    <div class="row">
+      <h3>Format</h3>
+      <p>Sweeps five encodings against four delimiters until the file parses, finds the real header row wherever it is hiding, recognises the export's shape, and hides the columns nobody reads.</p>
+    </div>
+    <div class="row">
+      <h3>Compare</h3>
+      <p>Diffs this month's scan against last month's on asset plus vulnerability title, so remediation evidence and new findings separate themselves.</p>
+    </div>
+    <div class="row">
+      <h3>Wiz</h3>
+      <p>Flattens a nested <code>issuesV2</code> GraphQL response down to one row per security-tool finding, surviving the nulls the API returns in place of missing objects.</p>
+    </div>
+    <div class="row">
+      <h3>Group by business unit</h3>
+      <p>Looks every hostname up in a local inventory database and splits the findings into one sheet per team. Whatever fails to match lands in <code>_Unmapped</code>, which doubles as a coverage report.</p>
+    </div>
+    <div class="row">
+      <h3>Qualys</h3>
+      <p>Lists, filters and downloads reports over the API, then formats them in the same pass. Handles first-login EULA activation for API-only accounts.</p>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>What a comparison gives you</h2>
+  <p class="lede">One workbook, four sheets, every original column still in the file.</p>
+  <div class="sheets">
+    <div class="sheet">
+      <p class="tab">Matching</p>
+      <p>In both scans. Still open.</p>
+    </div>
+    <div class="sheet">
+      <p class="tab">Only in File 1</p>
+      <p>Gone since the baseline. Your remediation evidence.</p>
+    </div>
+    <div class="sheet">
+      <p class="tab">Only in File 2</p>
+      <p>New since the baseline. The fresh backlog.</p>
+    </div>
+    <div class="sheet">
+      <p class="tab">Summary</p>
+      <p>Counts, and which columns were used as the key.</p>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>Running it</h2>
+  <p class="lede">Python 3.8 or newer. Four tabs work immediately; the Qualys tab needs an account first.</p>
+<pre><span class="c"># install</span>
+pip install PyQt5 pandas openpyxl xlrd
+python VM_File_Formatter.py</pre>
+<pre><span class="c"># only if you want the Qualys tab</span>
+export QUALYS_API_URL="https://qualysapi.qualys.com"   <span class="c"># your pod</span>
+export QUALYS_API_USER="&lt;api username&gt;"
+export VAULT_SECRET="&lt;a long random passphrase&gt;"
+python VM_File_Formatter.py --encrypt-qualys-password</pre>
+  <p class="note"><strong>No credentials ship with this repository.</strong> The pod URL, username, vault secret and password token are all blank by default. The password is stored only as a token encrypted against a secret held outside the source, and is decrypted in memory for the moment a request is signed. Until all four are set, the Qualys tab names exactly what is missing and does nothing.</p>
+</section>
+</main>
+
+<!-- Replace REPO_URL below with your repository link. -->
+<footer class="wrap">
+  <p>Built for a monthly vulnerability-reporting cycle. Read the <a href="REPO_URL">full documentation in the README</a>.</p>
+</footer>
+
+<script>
+(function(){
+  var grid = document.getElementById('grid');
+  var count = document.getElementById('count');
+  var replay = document.getElementById('replay');
+  if(!grid) return;
+
+  var cols = Array.prototype.slice.call(grid.querySelectorAll('.col'));
+  var noise = cols.filter(function(c){ return c.dataset.keep === '0'; });
+  var kept  = cols.filter(function(c){ return c.dataset.keep === '1'; });
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  function settled(){
+    kept.forEach(function(c){ c.classList.add('keep'); });
+    noise.forEach(function(c){ c.classList.add('collapsed'); });
+    count.textContent = kept.length + ' columns left visible';
+  }
+  function reset(){
+    cols.forEach(function(c){ c.classList.remove('collapsed','keep'); });
+    count.textContent = cols.length + ' columns in the export';
+  }
+  function play(){
+    reset();
+    if(reduce.matches){ settled(); return; }
+    window.setTimeout(settled, 900);
+  }
+
+  replay.addEventListener('click', play);
+
+  if(reduce.matches){ settled(); return; }
+
+  // Run once, when the grid is actually on screen.
+  if(!('IntersectionObserver' in window)){ play(); return; }
+  var seen = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if(e.isIntersecting){ seen.disconnect(); play(); }
+    });
+  }, { threshold: 0.4 });
+  seen.observe(grid);
+})();
+</script>
+</body>
+</html>
