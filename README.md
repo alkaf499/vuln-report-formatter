@@ -9,6 +9,8 @@
   <img src="https://img.shields.io/badge/status-internal%20tool-orange" alt="Status">
 </p>
 
+<p align="center"><a href="https://alkaf499.github.io/vuln-report-formatter/">Overview page</a></p>
+
 ---
 
 ## Table of contents
@@ -106,7 +108,7 @@ The separation is deliberate and consistent:
 **Requirements:** Python 3.8 or newer.
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/alkaf499/vuln-report-formatter.git
 cd vuln-report-formatter
 
 python -m venv .venv
@@ -298,81 +300,45 @@ The flat `hostname → BU` shape makes lookup O(1) per row, and keeping the `_me
 
 ## Credential handling
 
-**Nothing organisation-specific ships in this repository.** The pod URL, the API username, the vault secret and the password token are all blank by default, so the script can be published or shared as-is. The Qualys tab stays inert until all four are supplied, and `qualys_config_problems()` drives a banner that names precisely which ones are still missing.
-
-### Setting it up
-
-**1. Point at your Qualys pod and account.**
+**Nothing organisation-specific ships in this repository.** The pod URL, API username, vault secret and password token are all blank by default. The Qualys tab stays inert until all four are set, and names exactly which are missing until then.
 
 ```bash
-export QUALYS_API_URL="https://qualysapi.qualys.com"
-export QUALYS_API_USER="<your api username>"
+export QUALYS_API_URL="https://qualysapi.qualys.com"   # your pod
+export QUALYS_API_USER="<api username>"
+export VAULT_SECRET="<a long random passphrase>"       # Windows: setx
+
+python VM_File_Formatter.py --encrypt-qualys-password  # paste the token into _QUALYS_PWD_TOKEN
 ```
 
-Qualys has one base URL per platform ("pod"), and yours depends on which one your subscription lives on — check **Help → About** in the Qualys UI. Common ones:
+Your pod depends on which Qualys platform your subscription lives on — check **Help → About** in the Qualys UI. Common ones are `qualysapi.qualys.com` (US), `qualysapi.qualys.eu` (EU) and `qualysapi.qg1.apps.qualys.in` (IN); the list is longer and Qualys may add more.
 
-| Region | Base URL |
-|---|---|
-| US | `https://qualysapi.qualys.com`, `https://qualysapi.qg2.apps.qualys.com` |
-| EU | `https://qualysapi.qualys.eu`, `https://qualysapi.qg2.apps.qualys.eu` |
-| IN | `https://qualysapi.qg1.apps.qualys.in` |
+The **same vault secret must be set on every machine** that decrypts the same token. Changing it invalidates every existing token.
 
-That list is not exhaustive and Qualys may add pods. There are in-file fallbacks (`_QUALYS_API_URL_FALLBACK`, `_QUALYS_API_USER_FALLBACK`) for deployments where environment variables aren't workable — filling them in writes your pod and username into the source, so don't commit them to a shared repo.
-
-**2. Choose a vault secret.** It is read from the `VAULT_SECRET` environment variable:
-
-```bash
-export VAULT_SECRET="<a long random passphrase>"     # macOS / Linux
-setx    VAULT_SECRET "<a long random passphrase>"    # Windows
-```
-
-There is also an in-file fallback, `_VAULT_SECRET_FALLBACK`, left deliberately empty. Filling it in puts the secret back into the source and gives up most of the benefit — use it only if an environment variable genuinely isn't workable in your deployment.
-
-**3. Encrypt the password:**
-
-```bash
-python VM_File_Formatter.py --encrypt-qualys-password
-```
-
-It refuses to run if no secret is configured, prompts twice with hidden input, and prints the token to paste into `_QUALYS_PWD_TOKEN`.
-
-The **same secret must be set on every machine** that decrypts the same token. Changing the secret invalidates every existing token, so re-run the command and paste a fresh one.
+Each setting has an in-file `*_FALLBACK` constant for deployments where environment variables aren't workable. Filling them in writes those values into the source, so don't commit them.
 
 ### How the scheme works
 
-Stdlib-only, no `cryptography` dependency: PBKDF2-HMAC-SHA256 (200,000 iterations) derives a 32-byte key from the vault secret plus a random 16-byte salt, an HMAC-SHA256 counter-mode keystream is expanded to the plaintext length, and the ciphertext is XORed and base64-encoded with the salt prefixed.
+Stdlib-only, no `cryptography` dependency: PBKDF2-HMAC-SHA256 (200,000 iterations) derives a key from the vault secret plus a random salt, an HMAC-SHA256 keystream is expanded to the plaintext length, and the ciphertext is XORed and base64-encoded with the salt prefixed.
 
-The plaintext is handled carefully at runtime. `QualysClient` receives a **callable**, not a string, so the password is only materialised inside `_send()` at the moment the `Authorization` header is built, and is `del`-ed immediately after. It is never stored on the instance, never logged, never written to disk.
-
-Misconfiguration fails loudly rather than silently. `VaultNotConfigured` is raised — and surfaced in the log pane with a 🔑 prefix — when no secret is set, when no token is stored, or when the secret doesn't match the one that produced the token. A wrong secret never yields a plausible-looking garbage password that produces a confusing 401 later.
+`QualysClient` receives a **callable**, not a string, so the password is only materialised inside `_send()` as the `Authorization` header is built, then `del`-ed. It is never stored on the instance, logged, or written to disk. Misconfiguration raises `VaultNotConfigured` rather than returning a garbage password that would fail as a confusing 401 later.
 
 > ### ⚠️ Know what this protects against
 >
-> With the secret in the environment, the repository on its own contains nothing usable: a token without its secret is inert. That is the point of keeping it out of the file.
+> A token without its secret is inert, so the repository on its own contains nothing usable. That is the point of keeping the secret out of the file.
 >
-> It is still **obfuscation, not key management**. The secret sits in the environment of the process, and anyone who can read that environment, or who fills in `_VAULT_SECRET_FALLBACK`, can recover the password. For a stronger guarantee use an OS keyring (`keyring`) or prompt for the password at launch.
->
-> Treat any committed token as sensitive regardless, and never commit a production token alongside a populated `_VAULT_SECRET_FALLBACK`.
+> It is still **obfuscation, not key management** — anyone who can read the process environment, or a filled-in `_VAULT_SECRET_FALLBACK`, can recover the password. For a stronger guarantee use an OS keyring (`keyring`) or prompt at launch.
 
 ---
 
 ## Typical workflow
 
-```mermaid
-flowchart LR
-    A[📥 Qualys tab<br/>download + format] --> B[📁 Format tab<br/>normalise other exports]
-    B --> C[🔍 Compare tab<br/>diff vs last month]
-    C --> D[🏢 Group by BU<br/>split for distribution]
-    D --> E[Send each BU<br/>their sheet]
-```
-
 A representative monthly cycle:
 
-1. **Qualys tab** — download this month's PCI reports, formatting applied automatically.
-2. **Wiz tab** — flatten the Wiz JSON export to CSV, then run it through the Format tab.
-3. **Compare tab** — diff against last month's file. `Only in File 1` is your remediation evidence; `Only in File 2` is the new backlog.
-4. **Group by BU** — split the current findings so each business unit receives only its own assets.
-5. Check the `_Unmapped` sheet — anything there means the master inventory needs updating.
+1. **Qualys tab** — download this month's PCI reports, formatted automatically.
+2. **Wiz tab** — flatten the Wiz JSON export, then run it through the Format tab.
+3. **Compare tab** — diff against last month. `Only in File 1` is your remediation evidence; `Only in File 2` is the new backlog.
+4. **Group by BU** — split the findings so each business unit gets only its own assets.
+5. Check `_Unmapped` — anything there means the master inventory needs updating.
 
 ---
 
@@ -381,43 +347,43 @@ A representative monthly cycle:
 <details>
 <summary><strong>"No BU database found"</strong></summary>
 
-`bu_database.json` isn't next to the script. Use **Rebuild BU Database** in the Group by BU tab, pointing at your master inventory workbook. Note that the file is resolved relative to the script's own directory, not your working directory.
+Use **Rebuild BU Database** in the Group by BU tab. The file is resolved relative to the script's own directory, not your working directory.
 </details>
 
 <details>
 <summary><strong>CSV loads as a single column</strong></summary>
 
-The delimiter sweep failed, usually because of unusual quoting. The log shows every encoding/delimiter attempt and its resulting shape — check which combinations were tried. The line-by-line fallback should catch most of these; if it doesn't, the file may have embedded newlines inside unquoted fields.
+The delimiter sweep failed, usually because of unusual quoting. The log lists every encoding/delimiter attempt and its resulting shape. If the line-by-line fallback also misses, the file may have embedded newlines inside unquoted fields.
 </details>
 
 <details>
 <summary><strong>"Could not find required columns" when comparing</strong></summary>
 
-Neither file exposes a recognised title column plus an asset or DNS column. The error message lists the actual column names found. Either run both files through the Format tab first, or add your column names to `detect_key_columns()`.
+Neither file exposes a recognised title column plus an asset or DNS column; the error lists what it did find. Run both files through the Format tab first, or add your column names to `detect_key_columns()`.
 </details>
 
 <details>
 <summary><strong>🔑 "Qualys not configured" / "Credential vault not ready"</strong></summary>
 
-The banner and the warning dialog list exactly which of the four settings are missing: pod URL, API username, vault secret, or password token. A fifth case is a vault secret that doesn't match the one the stored token was made with. The log message says which. Set `VAULT_SECRET`, re-run `--encrypt-qualys-password`, and paste the new token into `_QUALYS_PWD_TOKEN`. If the app was already running when you set the environment variable, restart it — the environment is read at process start.
+The banner and dialog name which of the four settings are missing. A fifth case is a vault secret that doesn't match the one the stored token was made with — re-run `--encrypt-qualys-password` and paste the new token. If the app was already running when you set the variable, restart it; the environment is read at process start.
 </details>
 
 <details>
 <summary><strong>Qualys returns an access-denied or registration error</strong></summary>
 
-The account hasn't accepted the EULA. The download thread retries automatically after calling `/msp/acceptEULA.php`; if it doesn't, use the **Accept EULA / Activate Account** button. This only needs to succeed once per account.
+The account hasn't accepted the EULA. The download thread retries automatically after calling `/msp/acceptEULA.php`; otherwise use the **Accept EULA / Activate Account** button. Only needs to succeed once per account.
 </details>
 
 <details>
 <summary><strong>Everything lands in `_Unmapped`</strong></summary>
 
-Hostname formats don't match between the scan export and the master inventory — typically short names in one and FQDNs in the other. Lookup is case-insensitive but requires an exact string match otherwise.
+Hostname formats don't match between the scan export and the master inventory — typically short names in one and FQDNs in the other. Lookup is case-insensitive but otherwise needs an exact match.
 </details>
 
 <details>
 <summary><strong>No reports matched the filter</strong></summary>
 
-Three filters compound: title keyword, current month, and CSV-only format. A report launched last month, or generated as PDF, won't appear. Untick **current month only** and set state to **All** to widen the search, then read the log — it lists every report that matched the title but was skipped for format.
+Three filters compound: title keyword, current month, and CSV-only. Untick **current month only** and set state to **All** to widen the search, then read the log — it lists every report that matched the title but was skipped for format.
 </details>
 
 ---
@@ -429,10 +395,11 @@ Three filters compound: title keyword, current month, and CSV-only format. A rep
 ├── VM_File_Formatter.py    # Single-file application
 ├── bu_database.json        # Generated — hostname → BU map (do NOT commit)
 ├── .gitignore              # Note the leading dot — git ignores a file named "gitignore"
+├── docs/index.html         # Overview page served by GitHub Pages
 └── README.md
 ```
 
-> **Before pushing anywhere shared:** the script itself is clean, but two things generated beside it are not. `bu_database.json` contains your real hostnames and business-unit names, and `_QUALYS_PWD_TOKEN` plus any filled-in `*_FALLBACK` constants are deployment secrets. The supplied `.gitignore` covers the database and downloaded reports; the token lives in the source, so check it before every commit.
+> **Before pushing anywhere shared:** `bu_database.json` contains your real hostnames and BU names, and `_QUALYS_PWD_TOKEN` plus any filled-in `*_FALLBACK` constants are deployment secrets. `.gitignore` covers the database and downloaded reports; the token lives in the source, so check it before every commit.
 
 Inside the script:
 
@@ -451,9 +418,9 @@ Inside the script:
 
 ## Extending the tool
 
-**Add a new scanner format.** Add one branch to `detect_columns_to_keep()` and nothing else — both the Format tab and the Group by BU tab route through it. If the format needs preamble rows skipped, also extend `_detect_file_type()` to sniff the first line, and give it a sentinel first-column name the way `ASSET_VULN_DATALIST_KEY` does.
+**Add a new scanner format.** Add one branch to `detect_columns_to_keep()` and nothing else — both tabs route through it. If the format needs preamble rows skipped, also extend `_detect_file_type()` and give it a sentinel first-column name the way `ASSET_VULN_DATALIST_KEY` does.
 
-**Add a new tab.** Follow the existing shape: a pure engine class taking `log_callback`, a `QThread` emitting `progress` / `log_message` / `finished_signal`, and a `start_*` / `*_complete` method pair on `MainWindow`. Reuse `FileInputWidget` and `ModernButton` so the new tab matches the rest.
+**Add a new tab.** Follow the existing shape: a pure engine class taking `log_callback`, a `QThread` emitting `progress` / `log_message` / `finished_signal`, and a `start_*` / `*_complete` pair on `MainWindow`.
 
 **Teach the comparer new column names.** Extend the option lists in `detect_key_columns()` and the `desired_columns` lists in `_get_columns_to_keep()` / `find_common_columns()`.
 
